@@ -4,78 +4,54 @@
 #include <cstring>
 
 namespace llaisys::device::cpu {
+namespace {
 
-namespace runtime_api {
-int getDeviceCount() {
-    return 1;
+int deviceCount() { return 1; }
+void selectDevice(int) {}
+void synchronizeDevice() {}
+
+llaisysStream_t makeStream() { return nullptr; }
+void releaseStream(llaisysStream_t) {}
+void synchronizeStream(llaisysStream_t) {}
+
+void *allocate(size_t bytes) {
+    return bytes == 0 ? nullptr : std::malloc(bytes);
 }
 
-void setDevice(int) {
-    // do nothing
-}
+void release(void *memory) { std::free(memory); }
 
-void deviceSynchronize() {
-    // do nothing
-}
-
-llaisysStream_t createStream() {
-    return (llaisysStream_t)0; // null stream
-}
-
-void destroyStream(llaisysStream_t stream) {
-    // do nothing
-}
-void streamSynchronize(llaisysStream_t stream) {
-    // do nothing
-}
-
-void *mallocDevice(size_t size) {
-    if (size == 0) {
-        return nullptr;
+void copy(void *destination, const void *source, size_t bytes, llaisysMemcpyKind_t) {
+    if (bytes != 0) {
+        std::memmove(destination, source, bytes);
     }
-    return std::malloc(size);
 }
 
-void freeDevice(void *ptr) {
-    std::free(ptr);
+void copyAsync(
+    void *destination,
+    const void *source,
+    size_t bytes,
+    llaisysMemcpyKind_t kind,
+    llaisysStream_t) {
+    copy(destination, source, bytes, kind);
 }
 
-void *mallocHost(size_t size) {
-    return mallocDevice(size);
-}
+const LlaisysRuntimeAPI CPU_API{
+    &deviceCount,
+    &selectDevice,
+    &synchronizeDevice,
+    &makeStream,
+    &releaseStream,
+    &synchronizeStream,
+    &allocate,
+    &release,
+    &allocate,
+    &release,
+    &copy,
+    &copyAsync,
+};
 
-void freeHost(void *ptr) {
-    freeDevice(ptr);
-}
+} // namespace
 
-void memcpySync(void *dst, const void *src, size_t size, llaisysMemcpyKind_t kind) {
-    if (size == 0) {
-        return;
-    }
-    std::memcpy(dst, src, size);
-}
+const LlaisysRuntimeAPI *getRuntimeAPI() { return &CPU_API; }
 
-void memcpyAsync(void *dst, const void *src, size_t size, llaisysMemcpyKind_t kind, llaisysStream_t stream) {
-    memcpySync(dst, src, size, kind);
-}
-
-static const LlaisysRuntimeAPI RUNTIME_API = {
-    &getDeviceCount,
-    &setDevice,
-    &deviceSynchronize,
-    &createStream,
-    &destroyStream,
-    &streamSynchronize,
-    &mallocDevice,
-    &freeDevice,
-    &mallocHost,
-    &freeHost,
-    &memcpySync,
-    &memcpyAsync};
-
-} // namespace runtime_api
-
-const LlaisysRuntimeAPI *getRuntimeAPI() {
-    return &runtime_api::RUNTIME_API;
-}
 } // namespace llaisys::device::cpu

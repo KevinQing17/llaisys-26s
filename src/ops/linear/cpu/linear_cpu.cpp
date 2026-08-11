@@ -2,93 +2,62 @@
 
 #include "../../../utils.hpp"
 
-template <typename T>
-void linear_(
-    T *out,
-    const T *in,
-    const T *weight,
-    const T *bias,
-    size_t m,
-    size_t n,
-    size_t k) {
+namespace llaisys::ops::cpu {
+namespace {
 
-    // i：输入的第几行。
-    for (size_t i = 0; i < m; i++) {
-        // j：输出的第几个特征。
-        for (size_t j = 0; j < n; j++) {
-            // 有 bias 时从 bias[j] 开始；
-            // 没有 bias 时从 0 开始。
-            float sum = bias == nullptr
-                          ? 0.0f
-                          : llaisys::utils::cast<float>(bias[j]);
-
-            // 计算输入第 i 行与 weight 第 j 行的点积。
-            for (size_t p = 0; p < k; p++) {
-                float in_value = llaisys::utils::cast<float>(
-                    in[i * k + p]);
-
-                float weight_value = llaisys::utils::cast<float>(
-                    weight[j * k + p]);
-
-                sum += in_value * weight_value;
+template <class Scalar>
+void matrixProjection(
+    Scalar *output,
+    const Scalar *input,
+    const Scalar *weight,
+    const Scalar *bias,
+    size_t rows,
+    size_t columns,
+    size_t reduction) {
+    for (size_t row = 0; row < rows; ++row) {
+        for (size_t column = 0; column < columns; ++column) {
+            float total = 0.0f;
+            for (size_t inner = 0; inner < reduction; ++inner) {
+                total += utils::cast<float>(input[row * reduction + inner])
+                       * utils::cast<float>(weight[column * reduction + inner]);
             }
-
-            out[i * n + j] = llaisys::utils::cast<T>(sum);
+            if (bias != nullptr) {
+                total += utils::cast<float>(bias[column]);
+            }
+            output[row * columns + column] = utils::cast<Scalar>(total);
         }
     }
 }
 
-namespace llaisys::ops::cpu {
+} // namespace
 
 void linear(
-    std::byte *out,
-    const std::byte *in,
+    std::byte *output,
+    const std::byte *input,
     const std::byte *weight,
     const std::byte *bias,
-    llaisysDataType_t type,
-    size_t m,
-    size_t n,
-    size_t k) {
-
-    switch (type) {
+    llaisysDataType_t dtype,
+    size_t rows,
+    size_t columns,
+    size_t reduction) {
+    switch (dtype) {
     case LLAISYS_DTYPE_F32:
-        return linear_(
-            reinterpret_cast<float *>(out),
-            reinterpret_cast<const float *>(in),
-            reinterpret_cast<const float *>(weight),
-            bias == nullptr
-                ? nullptr
-                : reinterpret_cast<const float *>(bias),
-            m,
-            n,
-            k);
-
+        return matrixProjection(
+            reinterpret_cast<float *>(output), reinterpret_cast<const float *>(input),
+            reinterpret_cast<const float *>(weight), reinterpret_cast<const float *>(bias),
+            rows, columns, reduction);
     case LLAISYS_DTYPE_F16:
-        return linear_(
-            reinterpret_cast<llaisys::fp16_t *>(out),
-            reinterpret_cast<const llaisys::fp16_t *>(in),
-            reinterpret_cast<const llaisys::fp16_t *>(weight),
-            bias == nullptr
-                ? nullptr
-                : reinterpret_cast<const llaisys::fp16_t *>(bias),
-            m,
-            n,
-            k);
-
+        return matrixProjection(
+            reinterpret_cast<fp16_t *>(output), reinterpret_cast<const fp16_t *>(input),
+            reinterpret_cast<const fp16_t *>(weight), reinterpret_cast<const fp16_t *>(bias),
+            rows, columns, reduction);
     case LLAISYS_DTYPE_BF16:
-        return linear_(
-            reinterpret_cast<llaisys::bf16_t *>(out),
-            reinterpret_cast<const llaisys::bf16_t *>(in),
-            reinterpret_cast<const llaisys::bf16_t *>(weight),
-            bias == nullptr
-                ? nullptr
-                : reinterpret_cast<const llaisys::bf16_t *>(bias),
-            m,
-            n,
-            k);
-
+        return matrixProjection(
+            reinterpret_cast<bf16_t *>(output), reinterpret_cast<const bf16_t *>(input),
+            reinterpret_cast<const bf16_t *>(weight), reinterpret_cast<const bf16_t *>(bias),
+            rows, columns, reduction);
     default:
-        EXCEPTION_UNSUPPORTED_DATATYPE(type);
+        EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }
 }
 

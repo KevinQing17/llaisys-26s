@@ -1,67 +1,37 @@
 #include "add_nvidia.cuh"
 
-#include "../../../device/nvidia/cuda_utils.cuh"
-#include "../../../utils.hpp"
+#include "../../../device/nvidia/cuda_helpers.cuh"
 
+namespace llaisys::ops::nvidia {
 namespace {
 
-template <typename T>
-__global__ void addKernel(T *c, const T *a, const T *b, size_t numel) {
-    const size_t stride = static_cast<size_t>(blockDim.x) * gridDim.x;
-    for (size_t index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-         index < numel;
-         index += stride) {
-        const float value = llaisys::device::nvidia::toFloat(a[index])
-                          + llaisys::device::nvidia::toFloat(b[index]);
-        c[index] = llaisys::device::nvidia::fromFloat<T>(value);
+template <class Scalar>
+__global__ void addElements(Scalar *output, const Scalar *left, const Scalar *right, size_t count) {
+    const size_t step = static_cast<size_t>(blockDim.x) * gridDim.x;
+    for (size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < count; i += step) {
+        const float sum = device::nvidia::scalarToFloat(left[i]) + device::nvidia::scalarToFloat(right[i]);
+        output[i] = device::nvidia::floatToScalar<Scalar>(sum);
     }
 }
 
-template <typename T>
-void launchAdd(
-    std::byte *c,
-    const std::byte *a,
-    const std::byte *b,
-    size_t numel,
-    cudaStream_t stream) {
-    constexpr unsigned int threads = 256;
-    constexpr size_t max_blocks = 65535;
-    const size_t required_blocks = (numel - 1) / threads + 1;
-    const auto blocks = static_cast<unsigned int>(
-        required_blocks < max_blocks ? required_blocks : max_blocks);
-    addKernel<<<blocks, threads, 0, stream>>>(
-        reinterpret_cast<T *>(c),
-        reinterpret_cast<const T *>(a),
-        reinterpret_cast<const T *>(b),
-        numel);
-    llaisys::device::nvidia::checkCuda(cudaGetLastError(), "Add kernel launch failed");
+template <class Scalar>
+void launch(std::byte *output, const std::byte *left, const std::byte *right, size_t count, cudaStream_t stream) {
+    if (count == 0) return;
+    constexpr unsigned int block = 256;
+    addElements<<<device::nvidia::gridFor(count, block), block, 0, stream>>>(
+        reinterpret_cast<Scalar *>(output), reinterpret_cast<const Scalar *>(left), reinterpret_cast<const Scalar *>(right), count);
+    device::nvidia::requireCuda(cudaGetLastError(), "add kernel");
 }
 
 } // namespace
 
-namespace llaisys::ops::nvidia {
-
-void add(
-    std::byte *c,
-    const std::byte *a,
-    const std::byte *b,
-    llaisysDataType_t type,
-    size_t numel,
-    llaisysStream_t stream) {
-    if (numel == 0) {
-        return;
-    }
-
-    const cudaStream_t cuda_stream = device::nvidia::toCudaStream(stream);
-    switch (type) {
-    case LLAISYS_DTYPE_F32:
-        return launchAdd<float>(c, a, b, numel, cuda_stream);
-    case LLAISYS_DTYPE_F16:
-        return launchAdd<__half>(c, a, b, numel, cuda_stream);
-    case LLAISYS_DTYPE_BF16:
-        return launchAdd<__nv_bfloat16>(c, a, b, numel, cuda_stream);
-    default:
-        EXCEPTION_UNSUPPORTED_DATATYPE(type);
+void add(std::byte *output, const std::byte *left, const std::byte *right, llaisysDataType_t dtype, size_t count, llaisysStream_t stream) {
+    const cudaStream_t native_stream = device::nvidia::cudaStream(stream);
+    switch (dtype) {
+    case LLAISYS_DTYPE_F32: return launch<float>(output, left, right, count, native_stream);
+    case LLAISYS_DTYPE_F16: return launch<__half>(output, left, right, count, native_stream);
+    case LLAISYS_DTYPE_BF16: return launch<__nv_bfloat16>(output, left, right, count, native_stream);
+    default: EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }
 }
 

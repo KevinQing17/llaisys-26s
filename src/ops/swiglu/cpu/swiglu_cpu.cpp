@@ -4,63 +4,30 @@
 
 #include <cmath>
 
-template <typename T>
-void swiglu_(
-    T *out,
-    const T *gate,
-    const T *up,
-    size_t numel) {
+namespace llaisys::ops::cpu {
+namespace {
 
-    for (size_t i = 0; i < numel; i++) {
-        // 输入统一转换成 Float32 进行计算。
-        float gate_value = llaisys::utils::cast<float>(gate[i]);
-
-        float up_value = llaisys::utils::cast<float>(up[i]);
-
-        // SiLU(gate) = gate / (1 + exp(-gate))
-        float silu = gate_value / (1.0f + std::exp(-gate_value));
-
-        // SwiGLU = up * SiLU(gate)
-        float result = up_value * silu;
-
-        // 转换回输出张量的数据类型。
-        out[i] = llaisys::utils::cast<T>(result);
+template <class Scalar>
+void activate(Scalar *output, const Scalar *gate, const Scalar *up, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        const float gate_value = utils::cast<float>(gate[i]);
+        const float silu = gate_value / (1.0f + std::exp(-gate_value));
+        output[i] = utils::cast<Scalar>(silu * utils::cast<float>(up[i]));
     }
 }
 
-namespace llaisys::ops::cpu {
+} // namespace
 
-void swiglu(
-    std::byte *out,
-    const std::byte *gate,
-    const std::byte *up,
-    llaisysDataType_t type,
-    size_t numel) {
-
-    switch (type) {
+void swiglu(std::byte *output, const std::byte *gate, const std::byte *up, llaisysDataType_t dtype, size_t count) {
+    switch (dtype) {
     case LLAISYS_DTYPE_F32:
-        return swiglu_(
-            reinterpret_cast<float *>(out),
-            reinterpret_cast<const float *>(gate),
-            reinterpret_cast<const float *>(up),
-            numel);
-
+        return activate(reinterpret_cast<float *>(output), reinterpret_cast<const float *>(gate), reinterpret_cast<const float *>(up), count);
     case LLAISYS_DTYPE_F16:
-        return swiglu_(
-            reinterpret_cast<llaisys::fp16_t *>(out),
-            reinterpret_cast<const llaisys::fp16_t *>(gate),
-            reinterpret_cast<const llaisys::fp16_t *>(up),
-            numel);
-
+        return activate(reinterpret_cast<fp16_t *>(output), reinterpret_cast<const fp16_t *>(gate), reinterpret_cast<const fp16_t *>(up), count);
     case LLAISYS_DTYPE_BF16:
-        return swiglu_(
-            reinterpret_cast<llaisys::bf16_t *>(out),
-            reinterpret_cast<const llaisys::bf16_t *>(gate),
-            reinterpret_cast<const llaisys::bf16_t *>(up),
-            numel);
-
+        return activate(reinterpret_cast<bf16_t *>(output), reinterpret_cast<const bf16_t *>(gate), reinterpret_cast<const bf16_t *>(up), count);
     default:
-        EXCEPTION_UNSUPPORTED_DATATYPE(type);
+        EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }
 }
 

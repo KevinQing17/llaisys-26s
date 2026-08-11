@@ -5,13 +5,5 @@
 #include <cstddef>
 
 namespace llaisys::ops::nvidia {
-
-void add(
-    std::byte *c,
-    const std::byte *a,
-    const std::byte *b,
-    llaisysDataType_t type,
-    size_t numel,
-    llaisysStream_t stream);
-
-} // namespace llaisys::ops::nvidia
+void add(std::byte *output, const std::byte *left, const std::byte *right, llaisysDataType_t dtype, size_t count, llaisysStream_t stream);
+}

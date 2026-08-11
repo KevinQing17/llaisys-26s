@@ -5,13 +5,5 @@
 #include <cstddef>
 
 namespace llaisys::ops::nvidia {
-
-void swiglu(
-    std::byte *out,
-    const std::byte *gate,
-    const std::byte *up,
-    llaisysDataType_t type,
-    size_t numel,
-    llaisysStream_t stream);
-
-} // namespace llaisys::ops::nvidia
+void swiglu(std::byte *output, const std::byte *gate, const std::byte *up, llaisysDataType_t dtype, size_t count, llaisysStream_t stream);
+}

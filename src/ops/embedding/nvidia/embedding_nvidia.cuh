@@ -5,15 +5,5 @@
 #include <cstddef>
 
 namespace llaisys::ops::nvidia {
-
-void embedding(
-    std::byte *out,
-    const std::byte *index,
-    const std::byte *weight,
-    llaisysDataType_t type,
-    size_t num_indices,
-    size_t num_embeddings,
-    size_t embedding_dim,
-    llaisysStream_t stream);
-
-} // namespace llaisys::ops::nvidia
+void embedding(std::byte *output, const std::byte *indices, const std::byte *table, llaisysDataType_t dtype, size_t index_count, size_t row_count, size_t row_width, llaisysStream_t stream);
+}

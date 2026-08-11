@@ -1,91 +1,44 @@
 #include "embedding_nvidia.cuh"
 
-#include "../../../device/nvidia/cuda_utils.cuh"
-#include "../../../utils.hpp"
+#include "../../../device/nvidia/cuda_helpers.cuh"
 
 #include <cstdint>
 
+namespace llaisys::ops::nvidia {
 namespace {
 
-template <typename T>
-__global__ void embeddingKernel(
-    T *out,
-    const int64_t *index,
-    const T *weight,
-    size_t numel,
-    size_t num_embeddings,
-    size_t embedding_dim) {
-    const size_t stride = static_cast<size_t>(blockDim.x) * gridDim.x;
-    for (size_t output_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-         output_index < numel;
-         output_index += stride) {
-        const size_t index_offset = output_index / embedding_dim;
-        const size_t column = output_index % embedding_dim;
-        const int64_t row = index[index_offset];
-        if (row < 0 || static_cast<size_t>(row) >= num_embeddings) {
-            out[output_index] = T{};
-        } else {
-            out[output_index] = weight[static_cast<size_t>(row) * embedding_dim + column];
-        }
+template <class Scalar>
+__global__ void gatherRows(Scalar *output, const int64_t *indices, const Scalar *table, size_t elements, size_t rows, size_t width) {
+    const size_t step = static_cast<size_t>(blockDim.x) * gridDim.x;
+    for (size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < elements; i += step) {
+        const size_t item = i / width;
+        const size_t column = i - item * width;
+        const int64_t row = indices[item];
+        output[i] = row >= 0 && static_cast<size_t>(row) < rows
+            ? table[static_cast<size_t>(row) * width + column]
+            : Scalar{};
     }
 }
 
-template <typename T>
-void launchEmbedding(
-    std::byte *out,
-    const std::byte *index,
-    const std::byte *weight,
-    size_t num_indices,
-    size_t num_embeddings,
-    size_t embedding_dim,
-    cudaStream_t stream) {
-    const size_t numel = num_indices * embedding_dim;
-    constexpr unsigned int threads = 256;
-    constexpr size_t max_blocks = 65535;
-    const size_t required_blocks = (numel - 1) / threads + 1;
-    const auto blocks = static_cast<unsigned int>(
-        required_blocks < max_blocks ? required_blocks : max_blocks);
-    embeddingKernel<<<blocks, threads, 0, stream>>>(
-        reinterpret_cast<T *>(out),
-        reinterpret_cast<const int64_t *>(index),
-        reinterpret_cast<const T *>(weight),
-        numel,
-        num_embeddings,
-        embedding_dim);
-    llaisys::device::nvidia::checkCuda(
-        cudaGetLastError(), "Embedding kernel launch failed");
+template <class Scalar>
+void launch(std::byte *output, const std::byte *indices, const std::byte *table, size_t count, size_t rows, size_t width, cudaStream_t stream) {
+    const size_t elements = count * width;
+    if (elements == 0) return;
+    constexpr unsigned int block = 256;
+    gatherRows<<<device::nvidia::gridFor(elements, block), block, 0, stream>>>(
+        reinterpret_cast<Scalar *>(output), reinterpret_cast<const int64_t *>(indices), reinterpret_cast<const Scalar *>(table), elements, rows, width);
+    device::nvidia::requireCuda(cudaGetLastError(), "embedding kernel");
 }
 
 } // namespace
 
-namespace llaisys::ops::nvidia {
-
-void embedding(
-    std::byte *out,
-    const std::byte *index,
-    const std::byte *weight,
-    llaisysDataType_t type,
-    size_t num_indices,
-    size_t num_embeddings,
-    size_t embedding_dim,
-    llaisysStream_t stream) {
-    if (num_indices == 0 || embedding_dim == 0) {
-        return;
-    }
-
-    const cudaStream_t cuda_stream = device::nvidia::toCudaStream(stream);
-    switch (type) {
-    case LLAISYS_DTYPE_F32:
-        return launchEmbedding<float>(
-            out, index, weight, num_indices, num_embeddings, embedding_dim, cuda_stream);
-    case LLAISYS_DTYPE_F16:
-        return launchEmbedding<__half>(
-            out, index, weight, num_indices, num_embeddings, embedding_dim, cuda_stream);
-    case LLAISYS_DTYPE_BF16:
-        return launchEmbedding<__nv_bfloat16>(
-            out, index, weight, num_indices, num_embeddings, embedding_dim, cuda_stream);
-    default:
-        EXCEPTION_UNSUPPORTED_DATATYPE(type);
+void embedding(std::byte *output, const std::byte *indices, const std::byte *table, llaisysDataType_t dtype, size_t index_count, size_t row_count, size_t row_width, llaisysStream_t stream) {
+    const cudaStream_t native_stream = device::nvidia::cudaStream(stream);
+    switch (dtype) {
+    case LLAISYS_DTYPE_F32: return launch<float>(output, indices, table, index_count, row_count, row_width, native_stream);
+    case LLAISYS_DTYPE_F16: return launch<__half>(output, indices, table, index_count, row_count, row_width, native_stream);
+    case LLAISYS_DTYPE_BF16: return launch<__nv_bfloat16>(output, indices, table, index_count, row_count, row_width, native_stream);
+    default: EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }
 }
 

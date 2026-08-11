@@ -2,7 +2,6 @@
 
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
-
 #include "cpu/rope_cpu.hpp"
 #ifdef ENABLE_NVIDIA_API
 #include "nvidia/rope_nvidia.cuh"
@@ -10,103 +9,28 @@
 
 namespace llaisys::ops {
 
-void rope(
-    tensor_t out,
-    tensor_t in,
-    tensor_t pos_ids,
-    float theta) {
+void rope(tensor_t output, tensor_t input, tensor_t positions, float theta) {
+    CHECK_SAME_DEVICE(output, input, positions);
+    CHECK_SAME_SHAPE(output->shape(), input->shape());
+    CHECK_ARGUMENT(input->ndim() == 3 && positions->ndim() == 1, "rope expects [S,H,D] and [S]");
+    CHECK_ARGUMENT(positions->shape()[0] == input->shape()[0], "rope position count mismatch");
+    CHECK_ARGUMENT(positions->dtype() == LLAISYS_DTYPE_I64, "rope positions must be int64");
+    CHECK_ARGUMENT(output->dtype() == input->dtype() && input->shape()[2] % 2 == 0, "rope dtype or head width is invalid");
+    CHECK_ARGUMENT(output->isContiguous() && input->isContiguous() && positions->isContiguous(), "rope requires contiguous tensors");
 
-    // 三个张量必须位于同一设备。
-    CHECK_SAME_DEVICE(out, in, pos_ids);
-
-    // 输入和输出形状为：
-    // [seq_len, num_heads, head_dim]
-    CHECK_ARGUMENT(
-        in->ndim() == 3,
-        "RoPE: input must be a 3D tensor.");
-
-    CHECK_ARGUMENT(
-        out->ndim() == 3,
-        "RoPE: output must be a 3D tensor.");
-
-    // 输入输出形状必须完全一致。
-    CHECK_SAME_SHAPE(
-        out->shape(),
-        in->shape());
-
-    // 输入输出 dtype 必须一致。
-    CHECK_SAME_DTYPE(
-        out->dtype(),
-        in->dtype());
-
-    // 每个 token 对应一个位置编号。
-    CHECK_ARGUMENT(
-        pos_ids->ndim() == 1,
-        "RoPE: pos_ids must be a 1D tensor.");
-
-    CHECK_ARGUMENT(
-        pos_ids->shape()[0] == in->shape()[0],
-        "RoPE: pos_ids length must match sequence length.");
-
-    CHECK_ARGUMENT(
-        pos_ids->dtype() == LLAISYS_DTYPE_I64,
-        "RoPE: pos_ids must have Int64 dtype.");
-
-    // head_dim 必须能分成相同的前后两半。
-    CHECK_ARGUMENT(
-        in->shape()[2] > 0 && in->shape()[2] % 2 == 0,
-        "RoPE: head dimension must be positive and even.");
-
-    CHECK_ARGUMENT(
-        theta > 0.0f,
-        "RoPE: theta must be positive.");
-
-    ASSERT(
-        out->isContiguous() && in->isContiguous() && pos_ids->isContiguous(),
-        "RoPE: all tensors must be contiguous.");
-
-    size_t seq_len = in->shape()[0];
-    size_t num_heads = in->shape()[1];
-    size_t head_dim = in->shape()[2];
-
-    if (out->deviceType() == LLAISYS_DEVICE_CPU) {
-        return cpu::rope(
-            out->data(),
-            in->data(),
-            pos_ids->data(),
-            out->dtype(),
-            seq_len,
-            num_heads,
-            head_dim,
-            theta);
+    core::context().setDevice(output->deviceType(), output->deviceId());
+    const size_t sequence = input->shape()[0];
+    const size_t heads = input->shape()[1];
+    const size_t width = input->shape()[2];
+    if (output->deviceType() == LLAISYS_DEVICE_CPU) {
+        return cpu::rope(output->data(), input->data(), positions->data(), output->dtype(), sequence, heads, width, theta);
     }
-
-    core::context().setDevice(
-        out->deviceType(),
-        out->deviceId());
-
-    switch (out->deviceType()) {
-    case LLAISYS_DEVICE_CPU:
-        return cpu::rope(
-            out->data(),
-            in->data(),
-            pos_ids->data(),
-            out->dtype(),
-            seq_len,
-            num_heads,
-            head_dim,
-            theta);
-
 #ifdef ENABLE_NVIDIA_API
-    case LLAISYS_DEVICE_NVIDIA:
-        return nvidia::rope(
-            out->data(), in->data(), pos_ids->data(), out->dtype(), seq_len, num_heads,
-            head_dim, theta, core::context().runtime().stream());
-#endif
-
-    default:
-        EXCEPTION_UNSUPPORTED_DEVICE;
+    if (output->deviceType() == LLAISYS_DEVICE_NVIDIA) {
+        return nvidia::rope(output->data(), input->data(), positions->data(), output->dtype(), sequence, heads, width, theta, core::context().runtime().stream());
     }
+#endif
+    EXCEPTION_UNSUPPORTED_DEVICE;
 }
 
 } // namespace llaisys::ops

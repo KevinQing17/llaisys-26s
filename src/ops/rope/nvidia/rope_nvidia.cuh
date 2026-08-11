@@ -5,16 +5,5 @@
 #include <cstddef>
 
 namespace llaisys::ops::nvidia {
-
-void rope(
-    std::byte *out,
-    const std::byte *in,
-    const std::byte *pos_ids,
-    llaisysDataType_t type,
-    size_t seq_len,
-    size_t num_heads,
-    size_t head_dim,
-    float theta,
-    llaisysStream_t stream);
-
-} // namespace llaisys::ops::nvidia
+void rope(std::byte *output, const std::byte *input, const std::byte *positions, llaisysDataType_t dtype, size_t sequence, size_t heads, size_t width, float theta, llaisysStream_t stream);
+}

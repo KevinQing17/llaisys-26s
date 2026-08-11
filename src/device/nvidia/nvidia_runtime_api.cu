@@ -1,159 +1,105 @@
 #include "../runtime_api.hpp"
 
+#include "cuda_helpers.cuh"
+
 #include <cuda_runtime.h>
 
-#include <iostream>
 #include <stdexcept>
-#include <string>
 
 namespace llaisys::device::nvidia {
-
-namespace runtime_api {
-
 namespace {
 
-void checkCuda(cudaError_t status, const char *operation) {
-    if (status == cudaSuccess) {
-        return;
-    }
-
-    const char *description = cudaGetErrorString(status);
-    std::cerr << "[ERROR] " << operation << " failed: " << description << std::endl;
-    throw std::runtime_error(
-        std::string(operation) + " failed: " + description);
-}
-
-cudaMemcpyKind toCudaMemcpyKind(llaisysMemcpyKind_t kind) {
+cudaMemcpyKind copyDirection(llaisysMemcpyKind_t kind) {
     switch (kind) {
-    case LLAISYS_MEMCPY_H2H:
-        return cudaMemcpyHostToHost;
-    case LLAISYS_MEMCPY_H2D:
-        return cudaMemcpyHostToDevice;
-    case LLAISYS_MEMCPY_D2H:
-        return cudaMemcpyDeviceToHost;
-    case LLAISYS_MEMCPY_D2D:
-        return cudaMemcpyDeviceToDevice;
-    default:
-        throw std::invalid_argument("Invalid CUDA memcpy kind.");
+    case LLAISYS_MEMCPY_H2H: return cudaMemcpyHostToHost;
+    case LLAISYS_MEMCPY_H2D: return cudaMemcpyHostToDevice;
+    case LLAISYS_MEMCPY_D2H: return cudaMemcpyDeviceToHost;
+    case LLAISYS_MEMCPY_D2D: return cudaMemcpyDeviceToDevice;
+    default: throw std::invalid_argument("unknown memory copy direction");
     }
 }
 
-cudaStream_t toCudaStream(llaisysStream_t stream) {
-    return reinterpret_cast<cudaStream_t>(stream);
-}
-
-} // namespace
-
-int getDeviceCount() {
+int deviceCount() {
     int count = 0;
-    checkCuda(cudaGetDeviceCount(&count), "cudaGetDeviceCount");
+    requireCuda(cudaGetDeviceCount(&count), "cudaGetDeviceCount");
     return count;
 }
 
-void setDevice(int device_id) {
-    checkCuda(cudaSetDevice(device_id), "cudaSetDevice");
-}
+void selectDevice(int device) { requireCuda(cudaSetDevice(device), "cudaSetDevice"); }
+void synchronizeDevice() { requireCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize"); }
 
-void deviceSynchronize() {
-    checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-}
-
-llaisysStream_t createStream() {
+llaisysStream_t makeStream() {
     cudaStream_t stream = nullptr;
-    checkCuda(cudaStreamCreate(&stream), "cudaStreamCreate");
+    requireCuda(cudaStreamCreate(&stream), "cudaStreamCreate");
     return reinterpret_cast<llaisysStream_t>(stream);
 }
 
-void destroyStream(llaisysStream_t stream) {
-    if (stream == nullptr) {
-        return;
+void releaseStream(llaisysStream_t stream) {
+    if (stream != nullptr) {
+        requireCuda(cudaStreamDestroy(cudaStream(stream)), "cudaStreamDestroy");
     }
-    checkCuda(cudaStreamDestroy(toCudaStream(stream)), "cudaStreamDestroy");
 }
 
-void streamSynchronize(llaisysStream_t stream) {
-    checkCuda(cudaStreamSynchronize(toCudaStream(stream)), "cudaStreamSynchronize");
+void synchronizeStream(llaisysStream_t stream) {
+    requireCuda(cudaStreamSynchronize(cudaStream(stream)), "cudaStreamSynchronize");
 }
 
-void *mallocDevice(size_t size) {
-    if (size == 0) {
-        return nullptr;
-    }
-
-    void *ptr = nullptr;
-    checkCuda(cudaMalloc(&ptr, size), "cudaMalloc");
-    return ptr;
+void *allocateDevice(size_t bytes) {
+    if (bytes == 0) return nullptr;
+    void *memory = nullptr;
+    requireCuda(cudaMalloc(&memory, bytes), "cudaMalloc");
+    return memory;
 }
 
-void freeDevice(void *ptr) {
-    if (ptr == nullptr) {
-        return;
-    }
-    checkCuda(cudaFree(ptr), "cudaFree");
+void releaseDevice(void *memory) {
+    if (memory != nullptr) requireCuda(cudaFree(memory), "cudaFree");
 }
 
-void *mallocHost(size_t size) {
-    if (size == 0) {
-        return nullptr;
-    }
-
-    void *ptr = nullptr;
-    checkCuda(cudaMallocHost(&ptr, size), "cudaMallocHost");
-    return ptr;
+void *allocateHost(size_t bytes) {
+    if (bytes == 0) return nullptr;
+    void *memory = nullptr;
+    requireCuda(cudaMallocHost(&memory, bytes), "cudaMallocHost");
+    return memory;
 }
 
-void freeHost(void *ptr) {
-    if (ptr == nullptr) {
-        return;
-    }
-    checkCuda(cudaFreeHost(ptr), "cudaFreeHost");
+void releaseHost(void *memory) {
+    if (memory != nullptr) requireCuda(cudaFreeHost(memory), "cudaFreeHost");
 }
 
-void memcpySync(void *dst, const void *src, size_t size, llaisysMemcpyKind_t kind) {
-    if (size == 0) {
-        return;
-    }
-    checkCuda(
-        cudaMemcpy(dst, src, size, toCudaMemcpyKind(kind)),
-        "cudaMemcpy");
+void copySync(void *destination, const void *source, size_t bytes, llaisysMemcpyKind_t kind) {
+    if (bytes == 0) return;
+    requireCuda(cudaMemcpy(destination, source, bytes, copyDirection(kind)), "cudaMemcpy");
 }
 
-void memcpyAsync(
-    void *dst,
-    const void *src,
-    size_t size,
+void copyAsync(
+    void *destination,
+    const void *source,
+    size_t bytes,
     llaisysMemcpyKind_t kind,
     llaisysStream_t stream) {
-    if (size == 0) {
-        return;
-    }
-    checkCuda(
-        cudaMemcpyAsync(
-            dst,
-            src,
-            size,
-            toCudaMemcpyKind(kind),
-            toCudaStream(stream)),
+    if (bytes == 0) return;
+    requireCuda(
+        cudaMemcpyAsync(destination, source, bytes, copyDirection(kind), cudaStream(stream)),
         "cudaMemcpyAsync");
 }
 
-static const LlaisysRuntimeAPI RUNTIME_API = {
-    &getDeviceCount,
-    &setDevice,
-    &deviceSynchronize,
-    &createStream,
-    &destroyStream,
-    &streamSynchronize,
-    &mallocDevice,
-    &freeDevice,
-    &mallocHost,
-    &freeHost,
-    &memcpySync,
-    &memcpyAsync};
+const LlaisysRuntimeAPI CUDA_API{
+    &deviceCount,
+    &selectDevice,
+    &synchronizeDevice,
+    &makeStream,
+    &releaseStream,
+    &synchronizeStream,
+    &allocateDevice,
+    &releaseDevice,
+    &allocateHost,
+    &releaseHost,
+    &copySync,
+    &copyAsync,
+};
 
-} // namespace runtime_api
+} // namespace
 
-const LlaisysRuntimeAPI *getRuntimeAPI() {
-    return &runtime_api::RUNTIME_API;
-}
+const LlaisysRuntimeAPI *getRuntimeAPI() { return &CUDA_API; }
+
 } // namespace llaisys::device::nvidia

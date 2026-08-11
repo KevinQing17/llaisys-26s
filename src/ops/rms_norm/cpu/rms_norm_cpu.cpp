@@ -4,88 +4,52 @@
 
 #include <cmath>
 
-template <typename T>
-void rms_norm_(
-    T *out,
-    const T *in,
-    const T *weight,
+namespace llaisys::ops::cpu {
+namespace {
+
+template <class Scalar>
+void normalizeRows(
+    Scalar *output,
+    const Scalar *input,
+    const Scalar *weight,
     size_t rows,
-    size_t hidden_size,
-    float eps) {
-
-    // 每一行独立进行归一化。
-    for (size_t row = 0; row < rows; row++) {
-        float sum_square = 0.0f;
-
-        // 第一遍：计算这一行的平方和。
-        for (size_t col = 0; col < hidden_size; col++) {
-            float value = llaisys::utils::cast<float>(
-                in[row * hidden_size + col]);
-
-            sum_square += value * value;
+    size_t width,
+    float epsilon) {
+    for (size_t row = 0; row < rows; ++row) {
+        float square_sum = 0.0f;
+        for (size_t column = 0; column < width; ++column) {
+            const float value = utils::cast<float>(input[row * width + column]);
+            square_sum += value * value;
         }
-
-        // mean_square = 平方和 / 每行元素数量
-        float mean_square = sum_square / static_cast<float>(hidden_size);
-
-        // 使用倒数后，后面可以用乘法代替每个元素的除法。
-        float inv_rms = 1.0f / std::sqrt(mean_square + eps);
-
-        // 第二遍：归一化并乘可学习权重。
-        for (size_t col = 0; col < hidden_size; col++) {
-            float input_value = llaisys::utils::cast<float>(
-                in[row * hidden_size + col]);
-
-            float weight_value = llaisys::utils::cast<float>(weight[col]);
-
-            float result = input_value * inv_rms * weight_value;
-
-            out[row * hidden_size + col] = llaisys::utils::cast<T>(result);
+        const float multiplier = 1.0f / std::sqrt(square_sum / static_cast<float>(width) + epsilon);
+        for (size_t column = 0; column < width; ++column) {
+            const float result = utils::cast<float>(input[row * width + column])
+                               * multiplier
+                               * utils::cast<float>(weight[column]);
+            output[row * width + column] = utils::cast<Scalar>(result);
         }
     }
 }
 
-namespace llaisys::ops::cpu {
+} // namespace
 
 void rms_norm(
-    std::byte *out,
-    const std::byte *in,
+    std::byte *output,
+    const std::byte *input,
     const std::byte *weight,
-    llaisysDataType_t type,
+    llaisysDataType_t dtype,
     size_t rows,
-    size_t hidden_size,
-    float eps) {
-
-    switch (type) {
+    size_t width,
+    float epsilon) {
+    switch (dtype) {
     case LLAISYS_DTYPE_F32:
-        return rms_norm_(
-            reinterpret_cast<float *>(out),
-            reinterpret_cast<const float *>(in),
-            reinterpret_cast<const float *>(weight),
-            rows,
-            hidden_size,
-            eps);
-
+        return normalizeRows(reinterpret_cast<float *>(output), reinterpret_cast<const float *>(input), reinterpret_cast<const float *>(weight), rows, width, epsilon);
     case LLAISYS_DTYPE_F16:
-        return rms_norm_(
-            reinterpret_cast<llaisys::fp16_t *>(out),
-            reinterpret_cast<const llaisys::fp16_t *>(in),
-            reinterpret_cast<const llaisys::fp16_t *>(weight),
-            rows,
-            hidden_size,
-            eps);
-
+        return normalizeRows(reinterpret_cast<fp16_t *>(output), reinterpret_cast<const fp16_t *>(input), reinterpret_cast<const fp16_t *>(weight), rows, width, epsilon);
     case LLAISYS_DTYPE_BF16:
-        return rms_norm_(
-            reinterpret_cast<llaisys::bf16_t *>(out),
-            reinterpret_cast<const llaisys::bf16_t *>(in),
-            reinterpret_cast<const llaisys::bf16_t *>(weight),
-            rows,
-            hidden_size,
-            eps);
-
+        return normalizeRows(reinterpret_cast<bf16_t *>(output), reinterpret_cast<const bf16_t *>(input), reinterpret_cast<const bf16_t *>(weight), rows, width, epsilon);
     default:
-        EXCEPTION_UNSUPPORTED_DATATYPE(type);
+        EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }
 }
 

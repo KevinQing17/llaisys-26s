@@ -2,185 +2,92 @@
 
 #include "../../../utils.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
 
-template <typename T>
-void self_attention_(
-    T *attn_val,
-    const T *q,
-    const T *k,
-    const T *v,
-    size_t q_len,
-    size_t kv_len,
-    size_t num_heads,
-    size_t num_kv_heads,
-    size_t qk_dim,
-    size_t value_dim,
+namespace llaisys::ops::cpu {
+namespace {
+
+template <class Scalar>
+void causalAttention(
+    Scalar *output,
+    const Scalar *query,
+    const Scalar *key,
+    const Scalar *value,
+    size_t query_length,
+    size_t key_length,
+    size_t query_heads,
+    size_t key_value_heads,
+    size_t query_key_width,
+    size_t value_width,
     float scale) {
+    const size_t heads_per_group = query_heads / key_value_heads;
+    std::vector<float> probabilities(key_length);
 
-    size_t heads_per_kv = num_heads / num_kv_heads;
+    for (size_t token = 0; token < query_length; ++token) {
+        const size_t allowed = key_length - query_length + token + 1;
+        for (size_t head = 0; head < query_heads; ++head) {
+            const size_t kv_head = head / heads_per_group;
+            float largest = -std::numeric_limits<float>::infinity();
 
-    size_t past_len = kv_len - q_len;
-
-    // 重复利用这块临时内存，保存一个 Query 的注意力分数。
-    std::vector<float> scores(kv_len);
-
-    for (size_t query_index = 0;
-         query_index < q_len;
-         query_index++) {
-
-        // 因果掩码允许访问的 Key 数量。
-        size_t allowed_kv = past_len + query_index + 1;
-
-        for (size_t head = 0;
-             head < num_heads;
-             head++) {
-
-            // 多个 Query Head 可以共享同一个 KV Head。
-            size_t kv_head = head / heads_per_kv;
-
-            float max_score = -std::numeric_limits<float>::infinity();
-
-            // 第一遍：计算 QK^T × scale，并找最大值。
-            for (size_t key_index = 0;
-                 key_index < allowed_kv;
-                 key_index++) {
-
-                float dot = 0.0f;
-
-                for (size_t dim = 0;
-                     dim < qk_dim;
-                     dim++) {
-
-                    size_t q_offset = (query_index * num_heads + head) * qk_dim + dim;
-
-                    size_t k_offset = (key_index * num_kv_heads + kv_head) * qk_dim + dim;
-
-                    float q_value = llaisys::utils::cast<float>(
-                        q[q_offset]);
-
-                    float k_value = llaisys::utils::cast<float>(
-                        k[k_offset]);
-
-                    dot += q_value * k_value;
+            for (size_t source = 0; source < allowed; ++source) {
+                float score = 0.0f;
+                const size_t q_base = (token * query_heads + head) * query_key_width;
+                const size_t k_base = (source * key_value_heads + kv_head) * query_key_width;
+                for (size_t component = 0; component < query_key_width; ++component) {
+                    score += utils::cast<float>(query[q_base + component])
+                           * utils::cast<float>(key[k_base + component]);
                 }
-
-                float score = dot * scale;
-                scores[key_index] = score;
-
-                if (score > max_score) {
-                    max_score = score;
-                }
+                score *= scale;
+                probabilities[source] = score;
+                largest = std::max(largest, score);
             }
 
-            // 第二遍：稳定 Softmax 的指数与总和。
-            float exp_sum = 0.0f;
-
-            for (size_t key_index = 0;
-                 key_index < allowed_kv;
-                 key_index++) {
-
-                float exp_value = std::exp(
-                    scores[key_index] - max_score);
-
-                scores[key_index] = exp_value;
-                exp_sum += exp_value;
+            float normalizer = 0.0f;
+            for (size_t source = 0; source < allowed; ++source) {
+                probabilities[source] = std::exp(probabilities[source] - largest);
+                normalizer += probabilities[source];
             }
 
-            float inv_exp_sum = 1.0f / exp_sum;
-
-            // 将 Softmax 权重乘以 V。
-            for (size_t value_index = 0;
-                 value_index < value_dim;
-                 value_index++) {
-
-                float result = 0.0f;
-
-                for (size_t key_index = 0;
-                     key_index < allowed_kv;
-                     key_index++) {
-
-                    float attention_weight = scores[key_index] * inv_exp_sum;
-
-                    size_t v_offset = (key_index * num_kv_heads + kv_head) * value_dim + value_index;
-
-                    float v_value = llaisys::utils::cast<float>(
-                        v[v_offset]);
-
-                    result += attention_weight * v_value;
+            for (size_t component = 0; component < value_width; ++component) {
+                float aggregate = 0.0f;
+                for (size_t source = 0; source < allowed; ++source) {
+                    const size_t v_base = (source * key_value_heads + kv_head) * value_width;
+                    aggregate += (probabilities[source] / normalizer)
+                               * utils::cast<float>(value[v_base + component]);
                 }
-
-                size_t out_offset = (query_index * num_heads + head) * value_dim + value_index;
-
-                attn_val[out_offset] = llaisys::utils::cast<T>(result);
+                output[(token * query_heads + head) * value_width + component] = utils::cast<Scalar>(aggregate);
             }
         }
     }
 }
 
-namespace llaisys::ops::cpu {
+} // namespace
 
 void self_attention(
-    std::byte *attn_val,
-    const std::byte *q,
-    const std::byte *k,
-    const std::byte *v,
-    llaisysDataType_t type,
-    size_t q_len,
-    size_t kv_len,
-    size_t num_heads,
-    size_t num_kv_heads,
-    size_t qk_dim,
-    size_t value_dim,
+    std::byte *output,
+    const std::byte *query,
+    const std::byte *key,
+    const std::byte *value,
+    llaisysDataType_t dtype,
+    size_t query_length,
+    size_t key_length,
+    size_t query_heads,
+    size_t key_value_heads,
+    size_t query_key_width,
+    size_t value_width,
     float scale) {
-
-    switch (type) {
+    switch (dtype) {
     case LLAISYS_DTYPE_F32:
-        return self_attention_(
-            reinterpret_cast<float *>(attn_val),
-            reinterpret_cast<const float *>(q),
-            reinterpret_cast<const float *>(k),
-            reinterpret_cast<const float *>(v),
-            q_len,
-            kv_len,
-            num_heads,
-            num_kv_heads,
-            qk_dim,
-            value_dim,
-            scale);
-
+        return causalAttention(reinterpret_cast<float *>(output), reinterpret_cast<const float *>(query), reinterpret_cast<const float *>(key), reinterpret_cast<const float *>(value), query_length, key_length, query_heads, key_value_heads, query_key_width, value_width, scale);
     case LLAISYS_DTYPE_F16:
-        return self_attention_(
-            reinterpret_cast<llaisys::fp16_t *>(attn_val),
-            reinterpret_cast<const llaisys::fp16_t *>(q),
-            reinterpret_cast<const llaisys::fp16_t *>(k),
-            reinterpret_cast<const llaisys::fp16_t *>(v),
-            q_len,
-            kv_len,
-            num_heads,
-            num_kv_heads,
-            qk_dim,
-            value_dim,
-            scale);
-
+        return causalAttention(reinterpret_cast<fp16_t *>(output), reinterpret_cast<const fp16_t *>(query), reinterpret_cast<const fp16_t *>(key), reinterpret_cast<const fp16_t *>(value), query_length, key_length, query_heads, key_value_heads, query_key_width, value_width, scale);
     case LLAISYS_DTYPE_BF16:
-        return self_attention_(
-            reinterpret_cast<llaisys::bf16_t *>(attn_val),
-            reinterpret_cast<const llaisys::bf16_t *>(q),
-            reinterpret_cast<const llaisys::bf16_t *>(k),
-            reinterpret_cast<const llaisys::bf16_t *>(v),
-            q_len,
-            kv_len,
-            num_heads,
-            num_kv_heads,
-            qk_dim,
-            value_dim,
-            scale);
-
+        return causalAttention(reinterpret_cast<bf16_t *>(output), reinterpret_cast<const bf16_t *>(query), reinterpret_cast<const bf16_t *>(key), reinterpret_cast<const bf16_t *>(value), query_length, key_length, query_heads, key_value_heads, query_key_width, value_width, scale);
     default:
-        EXCEPTION_UNSUPPORTED_DATATYPE(type);
+        EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }
 }
 

@@ -5,20 +5,5 @@
 #include <cstddef>
 
 namespace llaisys::ops::nvidia {
-
-void selfAttention(
-    std::byte *attn_val,
-    const std::byte *q,
-    const std::byte *k,
-    const std::byte *v,
-    llaisysDataType_t type,
-    size_t q_len,
-    size_t kv_len,
-    size_t num_heads,
-    size_t num_kv_heads,
-    size_t qk_dim,
-    size_t value_dim,
-    float scale,
-    llaisysStream_t stream);
-
-} // namespace llaisys::ops::nvidia
+void self_attention(std::byte *output, const std::byte *query, const std::byte *key, const std::byte *value, llaisysDataType_t dtype, size_t query_length, size_t key_length, size_t query_heads, size_t key_value_heads, size_t query_key_width, size_t value_width, float scale, llaisysStream_t stream);
+}

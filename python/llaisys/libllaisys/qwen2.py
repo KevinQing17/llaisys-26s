@@ -1,17 +1,9 @@
-from ctypes import Structure
-from ctypes import c_float
-from ctypes import c_int64
-from ctypes import c_size_t
-from ctypes import c_void_p
-from ctypes import c_int
-from ctypes import POINTER
+from ctypes import POINTER, Structure, c_float, c_int, c_int64, c_size_t, c_void_p
 
-from .llaisys_types import llaisysDataType_t
-from .llaisys_types import llaisysDeviceType_t
+from .llaisys_types import llaisysDataType_t, llaisysDeviceType_t
 from .tensor import llaisysTensor_t
 
 
-# Python 看不见 C++ Qwen2Model 的内部结构，只保存模型地址。
 llaisysQwen2Model_t = c_void_p
 
 
@@ -52,31 +44,27 @@ class LlaisysQwen2Weights(Structure):
     ]
 
 
-def load_qwen2(lib):
-    lib.llaisysQwen2ModelCreate.argtypes = [
+def load_qwen2(library):
+    library.llaisysQwen2ModelCreate.argtypes = [
         POINTER(LlaisysQwen2Meta),
         llaisysDeviceType_t,
         POINTER(c_int),
         c_int,
     ]
-    lib.llaisysQwen2ModelCreate.restype = llaisysQwen2Model_t
+    library.llaisysQwen2ModelCreate.restype = llaisysQwen2Model_t
 
-    lib.llaisysQwen2ModelDestroy.argtypes = [
-        llaisysQwen2Model_t,
-    ]
-    lib.llaisysQwen2ModelDestroy.restype = None
+    library.llaisysQwen2ModelDestroy.argtypes = [llaisysQwen2Model_t]
+    library.llaisysQwen2ModelDestroy.restype = None
 
-    lib.llaisysQwen2ModelWeights.argtypes = [
-        llaisysQwen2Model_t,
-    ]
-    lib.llaisysQwen2ModelWeights.restype = POINTER(LlaisysQwen2Weights)
-    lib.llaisysQwen2ModelReset.argtypes = [
-        llaisysQwen2Model_t,
-    ]
-    lib.llaisysQwen2ModelReset.restype = None
-    lib.llaisysQwen2ModelInfer.argtypes = [
+    library.llaisysQwen2ModelWeights.argtypes = [llaisysQwen2Model_t]
+    library.llaisysQwen2ModelWeights.restype = POINTER(LlaisysQwen2Weights)
+
+    library.llaisysQwen2ModelReset.argtypes = [llaisysQwen2Model_t]
+    library.llaisysQwen2ModelReset.restype = None
+
+    library.llaisysQwen2ModelInfer.argtypes = [
         llaisysQwen2Model_t,
         POINTER(c_int64),
         c_size_t,
     ]
-    lib.llaisysQwen2ModelInfer.restype = c_int64
+    library.llaisysQwen2ModelInfer.restype = c_int64
