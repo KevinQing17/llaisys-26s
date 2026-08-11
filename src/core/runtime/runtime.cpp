@@ -7,6 +7,10 @@ namespace llaisys::core {
 Runtime::Runtime(llaisysDeviceType_t device_type, int device_id)
     : _device_type(device_type), _device_id(device_id), _is_active(false) {
     _api = llaisys::device::getRuntimeAPI(_device_type);
+    // CUDA streams belong to the device that is current when they are created.
+    // Select this runtime's device first so a lazily-created multi-GPU runtime
+    // never inherits the previously active device's stream.
+    _api->set_device(_device_id);
     _stream = _api->create_stream();
     _allocator = new allocators::NaiveAllocator(_api);
 }

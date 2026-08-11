@@ -14,6 +14,11 @@ class RuntimeAPI:
         return result
 
     def set_device(self, device_id: int) -> None:
+        device_count = self.get_device_count()
+        if device_id < 0 or device_id >= device_count:
+            raise ValueError(
+                f"device_id must be in [0, {device_count}), got {device_id}"
+            )
         self._api.contents.set_device(device_id)
 
     def device_synchronize(self) -> None:
@@ -34,7 +39,6 @@ class RuntimeAPI:
         return ptr
 
     def free_device(self, ptr: c_void_p) -> None:
-        print(f"[llaisys] free_device({ptr})")
         self._api.contents.free_device(ptr)
 
     def malloc_host(self, size: int) -> c_void_p:

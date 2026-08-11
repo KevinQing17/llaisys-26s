@@ -30,6 +30,9 @@ void streamSynchronize(llaisysStream_t stream) {
 }
 
 void *mallocDevice(size_t size) {
+    if (size == 0) {
+        return nullptr;
+    }
     return std::malloc(size);
 }
 
@@ -46,6 +49,9 @@ void freeHost(void *ptr) {
 }
 
 void memcpySync(void *dst, const void *src, size_t size, llaisysMemcpyKind_t kind) {
+    if (size == 0) {
+        return;
+    }
     std::memcpy(dst, src, size);
 }
 

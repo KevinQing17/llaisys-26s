@@ -10,7 +10,9 @@ class Ops:
 
     @staticmethod
     def argmax(max_idx: Tensor, max_val: Tensor, vals: Tensor):
-        LIB_LLAISYS.llaisysArgmax(max_idx.lib_tensor(), max_val.lib_tensor(), vals.lib_tensor())
+        LIB_LLAISYS.llaisysArgmax(
+            max_idx.lib_tensor(), max_val.lib_tensor(), vals.lib_tensor()
+        )
 
     @staticmethod
     def embedding(out: Tensor, index: Tensor, weight: Tensor):
@@ -20,8 +22,13 @@ class Ops:
 
     @staticmethod
     def linear(out: Tensor, inp: Tensor, weight: Tensor, bias: Tensor):
+        bias_tensor = None if bias is None else bias.lib_tensor()
+
         LIB_LLAISYS.llaisysLinear(
-            out.lib_tensor(), inp.lib_tensor(), weight.lib_tensor(), bias.lib_tensor()
+            out.lib_tensor(),
+            inp.lib_tensor(),
+            weight.lib_tensor(),
+            bias_tensor,
         )
 
     @staticmethod
